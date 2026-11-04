@@ -204,7 +204,7 @@ table.sc{border-collapse:collapse;table-layout:fixed;width:100%;min-width:330px;
 <script>
 (() => {
 /* All distances are in yards. World axes: x to the right of the tee, y down the hole toward the green. */
-const CUP_R = .066, BALL_R = .047, PUTT_MAX = 30, PUTT_DEC = .65, SLOPE_G = 7.65, FULL_PULL = 150, MAX_STROKES = 10, GIMME = .7;
+const CUP_R = .066, BALL_R = .047, PUTT_MAX = 30, PUTT_DEC = .45, PUTT_STROKE = .65, ROLL_BOOST = 1.5, SLOPE_G = 7.65, FULL_PULL = 150, MAX_STROKES = 10, GIMME = .7;
 const KEY = 'pocketlinks.course.v1';
 const COL = {
   ob:'#1d3a23', rough:'#3d7a39', roughBlob:'rgba(22,60,25,.22)', fairway:'#67ac4a', fairway2:'#72b853', tee:'#6db34f',
@@ -231,7 +231,7 @@ const PUTTER = CLUBS.length - 1;
 const LIE_NAME = { tee:'Tee', fairway:'Fairway', fringe:'Fringe', rough:'Rough', bunker:'Bunker', green:'Green', water:'Water', ob:'OB' };
 const DISP = { tee:.012, fairway:.016, fringe:.016, rough:.035, bunker:.045, green:.01 };
 const LAND_ROLL = { tee:1, fairway:1, fringe:.7, rough:.3, green:.5, bunker:0 };
-const DEC = { tee:5.5, fairway:5.5, fringe:6, rough:16, green:1.8, bunker:40 };
+const DEC = { tee:5.5, fairway:5.5, fringe:6, rough:16, green:1.25, bunker:40 };
 const PDEC = { tee:3, fairway:3, fringe:2.2, rough:9, green:PUTT_DEC, bunker:40 };
 
 const RAW = [
@@ -495,7 +495,7 @@ function autoClub() {
   const maxIdx = game.lie === 'tee' ? 0 : 1;
   for (let i = PUTTER - 1; i >= maxIdx; i--) {
     const c = CLUBS[i];
-    if (c.carry * lieCarry(c, game.lie, dPin()) + c.roll * .6 >= d * .97) { game.club = i; return; }
+    if (c.carry * lieCarry(c, game.lie, dPin()) + c.roll * .6 * ROLL_BOOST >= d * .97) { game.club = i; return; }
   }
   game.club = maxIdx;
 }
@@ -504,7 +504,7 @@ function readyShot() {
   b.vx = b.vy = b.h = 0;
   game.lie = surface(h, b.x, b.y);
   const d = dPin();
-  const long = game.lie === 'tee' ? 0 : 1, reach = CLUBS[long].carry * lieCarry(CLUBS[long], game.lie, d) + CLUBS[long].roll;
+  const long = game.lie === 'tee' ? 0 : 1, reach = CLUBS[long].carry * lieCarry(CLUBS[long], game.lie, d) + CLUBS[long].roll * ROLL_BOOST;
   if (game.lie === 'green' || game.lie === 'fringe' || d <= reach + 8) game.aim = h.pin.slice();
   else game.aim = pointAt(h.corr, distPath(h.corr, b.x, b.y).along + reach - 5);
   autoClub();
@@ -550,7 +550,7 @@ function strike(p, lat) {
   if (club.putter) {
     const ang = shape * .035, rx = fy, ry = -fx;
     [fx, fy] = [fx * Math.cos(ang) + rx * Math.sin(ang), fy * Math.cos(ang) + ry * Math.sin(ang)];
-    const d = Math.max(.3, p * p * PUTT_MAX), v = Math.sqrt(2 * PUTT_DEC * d);
+    const d = Math.max(.3, p * p * PUTT_MAX), v = Math.sqrt(2 * PUTT_STROKE * d);
     b.vx = fx * v; b.vy = fy * v; game.putt = true; game.flight = null; game.state = 'roll';
     sfx.putt(); buzz(8);
     if (Math.abs(shape) >= .25) toast(shapeName(shape, true));
@@ -563,11 +563,11 @@ function strike(p, lat) {
   carry *= along >= 0 ? 1 + along * .005 : 1 + along * .009;
   const curve = shape * club.curve * carry;
   const drift = cross * .9 * carry / 150 + gauss() * (DISP[game.lie] || .02) * carry;
-  game.flight = { sx:b.x, sy:b.y, fx, fy, rx, ry, carry, curve, drift, apex:club.apex * (.55 + .45 * p), dur:1 + carry / 95, t:0, roll:club.roll * p, shape };
+  game.flight = { sx:b.x, sy:b.y, fx, fy, rx, ry, carry, curve, drift, apex:club.apex * (.55 + .45 * p), dur:1 + carry / 95, t:0, roll:club.roll * p * ROLL_BOOST, shape };
   game.putt = false; game.state = 'flight'; game.tracer = [[b.x, b.y, 0]];
   sfx.swing(p); buzz(12);
   const lx = b.x + fx * carry + rx * (curve + drift), ly = b.y + fy * carry + ry * (curve + drift);
-  game.camT = frameFor(game.cam.a, [[b.x, b.y], [lx + fx * club.roll, ly + fy * club.roll]], 'hole');
+  game.camT = frameFor(game.cam.a, [[b.x, b.y], [lx + fx * club.roll * ROLL_BOOST, ly + fy * club.roll * ROLL_BOOST]], 'hole');
 }
 
 /* ---------- penalties and finishing ---------- */
@@ -667,7 +667,7 @@ function step(dt) {
   }
   if (game.state !== 'roll') return;
   const s = surface(h, b.x, b.y);
-  dt *= game.putt ? 1.7 : s === 'green' ? 1.3 : 3;
+  dt *= game.putt ? 2.3 : s === 'green' ? 1.8 : 3;
   if (s === 'water') { waterPenalty(); return; }
   if (s === 'ob') { obPenalty(); return; }
   if (s === 'green' || s === 'fringe') { const g = slopeAt(h, b.x, b.y); b.vx += g[0] * SLOPE_G * dt; b.vy += g[1] * SLOPE_G * dt; }
@@ -733,7 +733,7 @@ function gauge(p) {
   if (!p) { $('padLeft').textContent = 'Pull down, then swipe straight up'; $('padRight').textContent = ''; return; }
   const club = CLUBS[game.club];
   $('padLeft').innerHTML = `Power <b>${Math.round(p * 100)}%</b>`;
-  $('padRight').innerHTML = club.putter ? `<b>${Math.round(p * p * PUTT_MAX * 3)} ft</b> roll` : `<b>${Math.round(fullCarry(game.club) * p)} y</b> carry`;
+  $('padRight').innerHTML = club.putter ? `<b>${Math.round(p * p * PUTT_MAX * PUTT_STROKE / PUTT_DEC * 3)} ft</b> roll` : `<b>${Math.round(fullCarry(game.club) * p)} y</b> carry`;
 }
 pad.addEventListener('pointerdown', e => {
   wakeAudio();
@@ -783,7 +783,7 @@ function hud() {
 function ui() {
   const club = CLUBS[game.club], d = dPin();
   $('clubName').textContent = club.name;
-  $('clubCarry').textContent = club.putter ? 'Up to 90 ft' : `${Math.round(fullCarry(game.club))} y carry`;
+  $('clubCarry').textContent = club.putter ? `Up to ${Math.round(PUTT_MAX * PUTT_STROKE / PUTT_DEC * 3)} ft` : `${Math.round(fullCarry(game.club))} y carry`;
   $('lie').textContent = LIE_NAME[game.lie] || '';
   $('windTxt').textContent = game.wind.mph ? `${game.wind.mph} mph` : 'Calm';
   if (d < 30 && (game.lie === 'green' || game.lie === 'fringe')) {
