@@ -204,7 +204,7 @@ table.sc{border-collapse:collapse;table-layout:fixed;width:100%;min-width:330px;
 <script>
 (() => {
 /* All distances are in yards. World axes: x to the right of the tee, y down the hole toward the green. */
-const CUP_R = .066, BALL_R = .047, PUTT_MAX = 30, PUTT_DEC = .45, PUTT_STROKE = .65, ROLL_BOOST = 1.5, SLOPE_G = 7.65, FULL_PULL = 150, MAX_STROKES = 10, GIMME = .7;
+const CUP_R = .066, BALL_R = .047, PUTT_MAX = 30, PUTT_DEC = .45, PUTT_STROKE = .65, ROLL_BOOST = 3, SLOPE_G = 7.65, FULL_PULL = 150, MAX_STROKES = 10, GIMME = .7;
 const KEY = 'pocketlinks.course.v1';
 const COL = {
   ob:'#1d3a23', rough:'#3d7a39', roughBlob:'rgba(22,60,25,.22)', fairway:'#67ac4a', fairway2:'#72b853', tee:'#6db34f',
@@ -230,7 +230,7 @@ const CLUBS = [
 const PUTTER = CLUBS.length - 1;
 const LIE_NAME = { tee:'Tee', fairway:'Fairway', fringe:'Fringe', rough:'Rough', bunker:'Bunker', green:'Green', water:'Water', ob:'OB' };
 const DISP = { tee:.012, fairway:.016, fringe:.016, rough:.035, bunker:.045, green:.01 };
-const LAND_ROLL = { tee:1, fairway:1, fringe:.7, rough:.3, green:.5, bunker:0 };
+const LAND_ROLL = { tee:1, fairway:1, fringe:.7, rough:.45, green:.5, bunker:0 };
 const DEC = { tee:5.5, fairway:5.5, fringe:6, rough:16, green:1.25, bunker:40 };
 const PDEC = { tee:3, fairway:3, fringe:2.2, rough:9, green:PUTT_DEC, bunker:40 };
 
