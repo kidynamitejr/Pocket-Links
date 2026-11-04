@@ -246,7 +246,7 @@ const PUTTER = CLUBS.length - 1;
 const LIE_NAME = { tee:'Tee', fairway:'Fairway', fringe:'Fringe', rough:'Rough', bunker:'Bunker', green:'Green', water:'Water', ob:'OB' };
 const DISP = { tee:.012, fairway:.016, fringe:.016, rough:.035, bunker:.045, green:.01 };
 const LAND_ROLL = { tee:1, fairway:1, fringe:.7, rough:.45, green:.5, bunker:0 };
-const DEC = { tee:5.5, fairway:5.5, fringe:6, rough:16, green:1.25, bunker:40 };
+const DEC = { tee:9, fairway:9, fringe:8, rough:18, green:1.25, bunker:40 };
 const PDEC = { tee:3, fairway:3, fringe:2.2, rough:9, green:PUTT_DEC, bunker:40 };
 
 const RAW = [
@@ -504,13 +504,22 @@ function lieCarry(club, lie, dPin) {
 }
 const dPin = () => hyp(hole().pin[0] - game.ball.x, hole().pin[1] - game.ball.y);
 const fullCarry = (ci) => CLUBS[ci].putter ? PUTT_MAX : CLUBS[ci].carry * lieCarry(CLUBS[ci], game.lie, dPin());
+/* Expected carry and total for a club toward the current aim, using the same lie, wind and roll rules as the real shot. */
+function shotNumbers(ci, p = 1) {
+  const c = CLUBS[ci], b = game.ball, h = hole();
+  const [fx, fy] = norm(game.aim[0] - b.x, game.aim[1] - b.y);
+  const wx = Math.sin(game.wind.a) * game.wind.mph, wy = Math.cos(game.wind.a) * game.wind.mph, along = wx * fx + wy * fy;
+  let carry = c.carry * p * lieCarry(c, game.lie, dPin());
+  carry *= along >= 0 ? 1 + along * .005 : 1 + along * .009;
+  const land = surface(h, b.x + fx * carry, b.y + fy * carry);
+  return { carry, total: carry + c.roll * p * ROLL_BOOST * (LAND_ROLL[land] ?? 0) };
+}
 function autoClub() {
   const b = game.ball, d = hyp(game.aim[0] - b.x, game.aim[1] - b.y);
   if (game.lie === 'green' || (game.lie === 'fringe' && dPin() < 14)) { game.club = PUTTER; return; }
   const maxIdx = game.lie === 'tee' ? 0 : 1;
   for (let i = PUTTER - 1; i >= maxIdx; i--) {
-    const c = CLUBS[i];
-    if (c.carry * lieCarry(c, game.lie, dPin()) + c.roll * .6 * ROLL_BOOST >= d * .97) { game.club = i; return; }
+    if (shotNumbers(i).total >= d * .97) { game.club = i; return; }
   }
   game.club = maxIdx;
 }
@@ -682,7 +691,7 @@ function step(dt) {
   }
   if (game.state !== 'roll') return;
   const s = surface(h, b.x, b.y);
-  dt *= game.putt ? 2.3 : s === 'green' ? 1.8 : 3;
+  dt *= game.putt ? 2.3 : s === 'green' ? 2.6 : 4.5;
   if (s === 'water') { waterPenalty(); return; }
   if (s === 'ob') { obPenalty(); return; }
   if (s === 'green' || s === 'fringe') { const g = slopeAt(h, b.x, b.y); b.vx += g[0] * SLOPE_G * dt; b.vy += g[1] * SLOPE_G * dt; }
@@ -748,7 +757,7 @@ function gauge(p) {
   if (!p) { $('padLeft').textContent = 'Pull down, then swipe straight up'; $('padRight').textContent = ''; return; }
   const club = CLUBS[game.club];
   $('padLeft').innerHTML = `Power <b>${Math.round(p * 100)}%</b>`;
-  $('padRight').innerHTML = club.putter ? `<b>${Math.round(p * p * PUTT_MAX * PUTT_STROKE / PUTT_DEC * 3)} ft</b> roll` : `<b>${Math.round(fullCarry(game.club) * p)} y</b> carry`;
+  $('padRight').innerHTML = club.putter ? `<b>${Math.round(p * p * PUTT_MAX * PUTT_STROKE / PUTT_DEC * 3)} ft</b> roll` : (n => `<b>${Math.round(n.carry)}</b> carry · <b>${Math.round(n.total)} y</b> total`)(shotNumbers(game.club, p));
 }
 pad.addEventListener('pointerdown', e => {
   wakeAudio();
@@ -798,7 +807,7 @@ function hud() {
 function ui() {
   const club = CLUBS[game.club], d = dPin();
   $('clubName').textContent = club.name;
-  $('clubCarry').textContent = club.putter ? `Up to ${Math.round(PUTT_MAX * PUTT_STROKE / PUTT_DEC * 3)} ft` : `${Math.round(fullCarry(game.club))} y carry`;
+  $('clubCarry').textContent = club.putter ? `Up to ${Math.round(PUTT_MAX * PUTT_STROKE / PUTT_DEC * 3)} ft` : (n => `Carry ${Math.round(n.carry)} · Total ${Math.round(n.total)}`)(shotNumbers(game.club));
   $('lie').textContent = LIE_NAME[game.lie] || '';
   $('windTxt').textContent = game.wind.mph ? `${game.wind.mph} mph` : 'Calm';
   if (d < 30 && (game.lie === 'green' || game.lie === 'fringe')) {
@@ -959,10 +968,16 @@ function draw() {
     ctx.font = '700 12px "Familjen Grotesk", system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
     const club = CLUBS[game.club];
     if (!club.putter) {
-      const [fx, fy] = norm(game.aim[0] - b.x, game.aim[1] - b.y), cr = fullCarry(game.club);
-      const [lx, ly] = toScreen(m, b.x + fx * cr, b.y + fy * cr);
-      ctx.beginPath(); ctx.arc(lx, ly, 6, 0, 7); ctx.fillStyle = 'rgba(255,210,63,.35)'; ctx.fill(); ctx.strokeStyle = COL.flag; ctx.stroke();
-      label(`${Math.round(cr)} y`, lx + 10, ly);
+      const [fx, fy] = norm(game.aim[0] - b.x, game.aim[1] - b.y), n = shotNumbers(game.club);
+      const [lx, ly] = toScreen(m, b.x + fx * n.carry, b.y + fy * n.carry), [ex, ey] = toScreen(m, b.x + fx * n.total, b.y + fy * n.total);
+      if (n.total - n.carry > 1) {
+        ctx.setLineDash([2, 4]); ctx.strokeStyle = COL.flag; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(ex, ey); ctx.stroke(); ctx.setLineDash([]);
+        ctx.beginPath(); ctx.arc(ex, ey, 3.5, 0, 7); ctx.fillStyle = COL.flag; ctx.fill();
+        label(`${Math.round(n.total)} total`, ex - 10 - ctx.measureText(`${Math.round(n.total)} total`).width - 10, ey);
+      }
+      ctx.beginPath(); ctx.arc(lx, ly, 6, 0, 7); ctx.fillStyle = 'rgba(255,210,63,.35)'; ctx.fill(); ctx.strokeStyle = COL.flag; ctx.lineWidth = 1.5; ctx.stroke();
+      label(`${Math.round(n.carry)} carry`, lx + 10, ly);
       label(`${Math.round(hyp(game.aim[0] - b.x, game.aim[1] - b.y))} y`, ax + 15, ay - 12);
     } else label(`${Math.round(hyp(game.aim[0] - b.x, game.aim[1] - b.y) * 3)} ft`, ax + 15, ay - 12);
   }
