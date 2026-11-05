@@ -1188,51 +1188,65 @@ const G3 = (() => {
   const tracer = new T.Line(trGeo, new T.LineBasicMaterial({ color:C3('#ffd23f'), transparent:true, opacity:.95 }));
   tracer.frustumCulled = false; scene.add(tracer);
 
-  // the club: swings around an unseen shoulder pivot. Local +X points down the target line, +Z toward the ball.
+  // the club: swings around an unseen shoulder pivot. Local +X points down the target line, +Z away from the golfer toward the ball.
+  // Each club is rebuilt to its real length, stance distance, head shape and loft. The face sits just behind the ball.
+  const BALL3 = .03;
   const golfer = new T.Group(), arms = new T.Group();
-  const toBall = new T.Vector3(0, -1.45, .55).normalize();
-  const swingAxis = new T.Vector3(1, 0, 0).cross(toBall).normalize();
-  const heads = {};
-  {
-    const chrome = new T.MeshPhongMaterial({ color:C3('#c8ccd1'), specular:0xffffff, shininess:110 });
-    const steel = new T.MeshPhongMaterial({ color:C3('#9aa1a8'), specular:0xffffff, shininess:90 });
-    const gripM = new T.MeshPhongMaterial({ color:C3('#1b1d1f'), shininess:8 });
-    const woodM = new T.MeshPhongMaterial({ color:C3('#15171a'), specular:0x888888, shininess:120 });
-    const faceM = new T.MeshPhongMaterial({ color:C3('#5d6369'), specular:0xffffff, shininess:60 });
-    const accent = new T.MeshPhongMaterial({ color:C3('#ffd23f'), shininess:40 });
-    arms.position.set(0, 1.45, .3); golfer.add(arms);
+  arms.position.set(0, 1.45, .3); golfer.add(arms); scene.add(golfer);
+  let swingAxis = new T.Vector3(0, 0, 1), clubId = null, stanceZ = .85;
+  const SPEC = {
+    DR:{ z:1, len:1.25, kind:'wood', s:1, loft:10.5 }, '3W':{ z:.95, len:1.19, kind:'wood', s:.8, loft:15 }, '5W':{ z:.92, len:1.16, kind:'wood', s:.72, loft:18 },
+    '4H':{ z:.88, len:1.12, kind:'hybrid', loft:22 },
+    '5I':{ z:.84, len:1.06, kind:'iron', loft:27 }, '6I':{ z:.82, len:1.05, kind:'iron', loft:30 }, '7I':{ z:.8, len:1.03, kind:'iron', loft:34 },
+    '8I':{ z:.78, len:1.02, kind:'iron', loft:38 }, '9I':{ z:.76, len:1, kind:'iron', loft:42 }, PW:{ z:.74, len:.99, kind:'iron', loft:46 },
+    GW:{ z:.72, len:.98, kind:'wedge', loft:50 }, SW:{ z:.71, len:.98, kind:'wedge', loft:56 }, LW:{ z:.7, len:.97, kind:'wedge', loft:60 },
+    PT:{ z:.6, len:.94, kind:'putter', loft:3 }
+  };
+  const phong = (c, sh, spec = 0xffffff) => new T.MeshPhongMaterial({ color:C3(c), specular:spec, shininess:sh });
+  const M = {
+    chrome:phong('#cfd3d8', 120), satin:phong('#a9aba8', 30, 0x777777), steel:phong('#9aa1a8', 90), graphite:phong('#20242b', 60, 0x666666),
+    grip:phong('#1b1d1f', 6, 0x222222), wood:phong('#111316', 140, 0x999999), hybrid:phong('#2b3036', 90, 0x888888),
+    face:phong('#5b6168', 60), groove:phong('#3a3e43', 10, 0x222222), putter:phong('#3c4146', 70), accent:phong('#ffd23f', 30, 0x444444)
+  };
+  const box = (x, y, z, m) => new T.Mesh(new T.BoxGeometry(x, y, z), m);
+  function buildClub(c) {
+    const sp = SPEC[c.id]; clubId = c.id; stanceZ = sp.z;
+    while (arms.children.length) { const o = arms.children[0]; arms.remove(o); o.traverse(n => n.geometry && n.geometry.dispose()); }
+    const head = new T.Group(), lf = sp.loft * Math.PI / 180;
+    let heel;
+    if (sp.kind === 'wood' || sp.kind === 'hybrid') {
+      const s = sp.s || 1, w = sp.kind === 'hybrid' ? .095 : .13 * s, d = sp.kind === 'hybrid' ? .075 : .12 * s, hg = sp.kind === 'hybrid' ? .042 : .062 * s;
+      const body = new T.Mesh(new T.SphereGeometry(1, 32, 18), sp.kind === 'hybrid' ? M.hybrid : M.wood);
+      body.scale.set(d / 2, hg / 2, w / 2); body.position.set(-d / 2, hg / 2, 0); head.add(body);
+      const face = box(.006, hg * .8, w * .78, M.face); face.position.set(-.004, hg * .48, 0); face.rotation.z = lf; head.add(face);
+      const mark = box(d * .22, .0012, .004, M.accent); mark.position.set(-d * .2, hg * .985, 0); head.add(mark);
+      heel = new T.Vector3(-d * .32, hg * .7, -w * .42);
+    } else if (sp.kind === 'putter') {
+      const blade = box(.024, .022, .105, M.putter); blade.position.set(-.012, .011, 0); head.add(blade);
+      const sight = box(.014, .0012, .003, M.accent); sight.position.set(-.012, .0226, 0); head.add(sight);
+      heel = new T.Vector3(-.012, .022, -.03);
+    } else {
+      const wedge = sp.kind === 'wedge', w = wedge ? .08 : .085, hg = wedge ? .056 : .048;
+      const blade = box(.011, hg, w, wedge ? M.satin : M.chrome); blade.position.set(-.006, hg / 2, 0); blade.rotation.z = lf * .55; head.add(blade);
+      for (let i = 0; i < 6; i++) { const g = box(.0012, .0016, w * .7, M.groove); g.position.set(.0058, -hg * .32 + i * hg * .11, .002); blade.add(g); }
+      const cavity = box(.012, hg * .42, w * .86, wedge ? M.satin : M.steel); cavity.position.set(-.016, hg * .24, 0); cavity.rotation.z = lf * .55; head.add(cavity);
+      const sole = box(.024, .006, w * .95, wedge ? M.satin : M.steel); sole.position.set(-.012, .003, 0); head.add(sole);
+      heel = new T.Vector3(-.008, hg * .6, -w * .5);
+    }
+    const headPos = new T.Vector3(-(BALL3 + .004), 0, stanceZ);
+    head.position.copy(headPos).sub(arms.position); arms.add(head);
+    const H = headPos.clone().add(heel).sub(arms.position), Ltot = H.length(), dir = H.clone().normalize();
+    const butt = Math.max(.2, Ltot - sp.len);
     const along = (len, r1, r2, m, start) => {
-      const c = cyl(r1, r2, len, m, 12); c.quaternion.setFromUnitVectors(UP, toBall);
-      c.position.copy(toBall.clone().multiplyScalar(start + len / 2)); return c;
+      const cy = cyl(r1, r2, len, m, 14); cy.quaternion.setFromUnitVectors(UP, dir);
+      cy.position.copy(dir.clone().multiplyScalar(start + len / 2)); arms.add(cy); return cy;
     };
-    // tapered grip with a cap, then a steel shaft that narrows toward the head
-    arms.add(along(.26, .016, .019, gripM, .5), along(.012, .02, .02, gripM, .49), along(.9, .0075, .0105, steel, .76));
-    const end = toBall.clone().multiplyScalar(1.55);
-    const hosel = along(.07, .008, .011, chrome, 1.48); arms.add(hosel);
-    // driver/wood/hybrid: rounded glossy head with a face plate and an alignment mark
-    const wood = new T.Group();
-    const crown = new T.Mesh(new T.SphereGeometry(1, 24, 14), woodM); crown.scale.set(.05, .028, .058); wood.add(crown);
-    const face = new T.Mesh(new T.BoxGeometry(.004, .036, .07), faceM); face.position.set(.046, 0, 0); wood.add(face);
-    const mark = new T.Mesh(new T.BoxGeometry(.03, .002, .004), accent); mark.position.set(.015, .028, 0); wood.add(mark);
-    wood.position.set(end.x - .05, .028, end.z + .02); heads.wood = wood;
-    // iron: thin chrome blade with a thicker cavity back and grooves
-    const iron = new T.Group();
-    const blade = new T.Mesh(new T.BoxGeometry(.012, .045, .08), chrome); blade.rotation.z = -.25; iron.add(blade);
-    const back = new T.Mesh(new T.BoxGeometry(.01, .02, .07), steel); back.position.set(-.009, -.01, 0); iron.add(back);
-    for (let i = 0; i < 4; i++) { const gv = new T.Mesh(new T.BoxGeometry(.001, .002, .06), faceM); gv.position.set(.0065, -.012 + i * .008, 0); gv.rotation.z = -.25; iron.add(gv); }
-    iron.position.set(end.x - .03, .023, end.z + .015); heads.iron = iron;
-    // putter: flat blade with a sight line
-    const putter = new T.Group();
-    const pb = new T.Mesh(new T.BoxGeometry(.022, .022, .1), faceM); putter.add(pb);
-    const sight = new T.Mesh(new T.BoxGeometry(.012, .001, .003), accent); sight.position.set(0, .0115, 0); putter.add(sight);
-    putter.position.set(end.x - .035, .011, end.z + .01); heads.putter = putter;
-    // heads live in golfer space at address; parent them to the swinging arms instead
-    for (const k in heads) { heads[k].position.sub(arms.position); arms.add(heads[k]); }
-  }
-  scene.add(golfer);
-  function showHead(club) {
-    const kind = club.putter ? 'putter' : (club.wood || club.id === '4H') ? 'wood' : 'iron';
-    for (const k in heads) heads[k].visible = k === kind;
+    const shaftM = sp.kind === 'wood' || sp.kind === 'hybrid' ? M.graphite : M.steel;
+    along(.27, .0155, .018, M.grip, butt);
+    along(.012, .0185, .0185, M.grip, butt - .006);
+    along(Ltot - butt - .29, .007, .0105, shaftM, butt + .26);
+    along(.04, .0085, .011, sp.kind === 'wood' ? M.graphite : sp.kind === 'wedge' ? M.satin : M.chrome, Ltot - .04);
+    swingAxis = new T.Vector3(1, 0, 0).cross(dir).normalize();
   }
 
   // per-hole objects
@@ -1337,8 +1351,10 @@ const G3 = (() => {
       pos = V(b.x - dx * 24, b.y - dy * 24, 9); look = V(b.x, b.y, 0); k = 1 - Math.exp(-dt * 3);
     } else if (game.state === 'aim') {
       const ad = hyp(game.aim[0] - b.x, game.aim[1] - b.y);
-      const back = putt ? 3 : 6, up = putt ? 1.3 : 2.5, ahead = putt ? Math.min(ad, 12) : 55;
-      pos = V(b.x - fx * back + fy * .3, b.y - fy * back - fx * .3, up); look = V(b.x + fx * ahead, b.y + fy * ahead, putt ? 0 : 2.6);
+      // stand a little behind and to the right of the ball so the clubface and ball both show
+      const back = putt ? 2.6 : 5, up = putt ? 1.2 : 2.7, side = putt ? .35 : .6, ahead = putt ? Math.min(ad, 12) : 22;
+      pos = V(b.x - fx * back + fy * side, b.y - fy * back - fx * side, up);
+      look = V(b.x + fx * ahead + fy * side * .5, b.y + fy * ahead - fx * side * .5, 0);
     }
     if (pos) {
       if (snap) { camPos.copy(pos); camLook.copy(look); snap = false; }
@@ -1349,7 +1365,7 @@ const G3 = (() => {
     // ball and its shadow
     const sinkS = game.sink ? clamp(1 - game.sink / .4, 0, 1) : 1;
     const bp = V(b.x, b.y, b.h);
-    const dist = camPos.distanceTo(bp), r = Math.max(BALL_R, dist * .0042) * sinkS;
+    const dist = camPos.distanceTo(bp), r = Math.max(BALL3, dist * .0042) * sinkS;
     ballM.visible = sinkS > 0; ballM.scale.setScalar(Math.max(r, .0001));
     ballM.position.set(bp.x, b.h + r - (game.sink ? game.sink * .3 : 0), bp.z);
     shadowM.position.set(bp.x, .02, bp.z); shadowM.scale.setScalar(Math.max(r, .0001) * (1.1 + b.h / 25));
@@ -1386,8 +1402,9 @@ const G3 = (() => {
     if (aiming) {
       const xA = new T.Vector3(fx, 0, -fy), zA = new T.Vector3(fy, 0, fx);
       tmpM.makeBasis(xA, UP, zA); golfer.quaternion.setFromRotationMatrix(tmpM);
-      golfer.position.copy(V(b.x - fy * .85, b.y + fx * .85, 0));
-      putterSwing = CLUBS[game.club].putter; showHead(CLUBS[game.club]);
+      if (clubId !== CLUBS[game.club].id) buildClub(CLUBS[game.club]);
+      golfer.position.copy(V(b.x - fy * stanceZ, b.y + fx * stanceZ, 0));
+      putterSwing = CLUBS[game.club].putter;
       const target = pull * (putterSwing ? .55 : 2.5);
       swingA += (target - swingA) * Math.min(1, dt * 18);
     } else if (t - strikeT < 2.4) {
