@@ -228,7 +228,7 @@ table.sc{border-collapse:collapse;table-layout:fixed;width:100%;min-width:330px;
 <script>
 (() => {
 /* All distances are in yards. World axes: x to the right of the tee, y down the hole toward the green. */
-const CUP_R = .066, BALL_R = .047, PUTT_MAX = 30, PUTT_DEC = .45, PUTT_STROKE = .65, ROLL_BOOST = 3, WIND_PUSH = 1.4, SLOPE_G = 7.65, FULL_PULL = 150, MAX_STROKES = 10, GIMME = .7;
+const CUP_R = .066, BALL_R = .047, PUTT_MAX = 30, PUTT_DEC = .45, PUTT_STROKE = .65, ROLL_BOOST = 3, WIND_PUSH = 2.3, SLOPE_G = 7.65, FULL_PULL = 150, MAX_STROKES = 10, GIMME = .7;
 const KEY = 'pocketlinks.course.v1';
 const COL = {
   ob:'#1d3a23', rough:'#3d7a39', roughBlob:'rgba(22,60,25,.22)', fairway:'#67ac4a', fairway2:'#72b853', tee:'#6db34f',
@@ -830,10 +830,24 @@ dropBtn.onclick = () => {
 
 const pad = $('pad');
 let sw = null;
+/* The angle of the upswipe sets the curve. A thumb naturally arcs a little as it swipes,
+   so anything within about 8 degrees of straight up counts as straight; about 30 degrees is a full hook or slice. */
+const SWIPE_DEAD = .14, SWIPE_FULL = .52;
+let lastShape = null;
+function swipeShape(e) {
+  const up = Math.max(1, sw.yb - e.clientY), a = Math.atan2(e.clientX - sw.xb, up);
+  const m = Math.max(0, Math.abs(a) - SWIPE_DEAD) / (SWIPE_FULL - SWIPE_DEAD);
+  return Math.sign(a) * Math.min(1, m);
+}
 function gauge(p) {
   $('gauge').style.width = (p * 100) + '%';
   if (G3) G3.setPull(p);
-  if (!p) { $('padLeft').textContent = 'Pull down, then swipe up. Angle it to curve.'; $('padRight').textContent = ''; return; }
+  if (!p) {
+    $('padLeft').textContent = 'Pull down, then swipe up. Angle it to curve.';
+    // after a shot, show how the swipe was read so the player can learn the feel
+    $('padRight').innerHTML = lastShape && game.time - lastShape.at < 6 ? `Last swipe: <b>${shapeName(lastShape.shape, CLUBS[game.club].putter)}</b>` : '';
+    return;
+  }
   const club = CLUBS[game.club];
   $('padLeft').innerHTML = `Power <b>${Math.round(p * 100)}%</b>`;
   $('padRight').innerHTML = club.putter ? `<b>${Math.round(p * p * PUTT_MAX * PUTT_STROKE / PUTT_DEC * 3)} ft</b> roll` : (n => `<b>${Math.round(n.carry)}</b> carry · <b>${Math.round(n.total)} y</b> total`)(shotNumbers(game.club, p));
@@ -853,9 +867,8 @@ pad.addEventListener('pointermove', e => {
     gauge(Math.min(1, sw.max / FULL_PULL));
   }
   if (sw.through && e.clientY <= sw.y0) {
-    // the angle of the upswipe sets the curve: about 24 degrees off vertical is a full hook or slice
-    const p = Math.min(1, sw.max / FULL_PULL), up = Math.max(1, sw.yb - e.clientY);
-    const shape = clamp(Math.atan2(e.clientX - sw.xb, up) / .42, -1, 1);
+    const p = Math.min(1, sw.max / FULL_PULL), shape = swipeShape(e);
+    lastShape = { shape, at:game.time };
     sw = null; strike(p, shape); gauge(0); ui();
   }
 });
