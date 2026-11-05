@@ -1056,11 +1056,13 @@ function draw2D() {
         ctx.setLineDash([2, 4]); ctx.strokeStyle = COL.flag; ctx.lineWidth = 2;
         ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(ex, ey); ctx.stroke(); ctx.setLineDash([]);
         ctx.beginPath(); ctx.arc(ex, ey, 3.5, 0, 7); ctx.fillStyle = COL.flag; ctx.fill();
-        label(`${Math.round(n.total)} total`, ex - 10 - ctx.measureText(`${Math.round(n.total)} total`).width - 10, ey);
       }
       ctx.beginPath(); ctx.arc(lx, ly, 6, 0, 7); ctx.fillStyle = 'rgba(255,210,63,.35)'; ctx.fill(); ctx.strokeStyle = COL.flag; ctx.lineWidth = 1.5; ctx.stroke();
-      label(`${Math.round(n.carry)} carry`, lx + 10, ly);
-      label(`${Math.round(hyp(game.aim[0] - b.x, game.aim[1] - b.y))} y`, ax + 15, ay - 12);
+      // arrow pointing down at the landing spot
+      const bob = Math.sin(game.time * 4) * 2;
+      ctx.fillStyle = COL.flag; ctx.strokeStyle = 'rgba(0,0,0,.45)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(lx, ly - 8 + bob); ctx.lineTo(lx - 7, ly - 18 + bob); ctx.lineTo(lx - 2.5, ly - 18 + bob); ctx.lineTo(lx - 2.5, ly - 27 + bob);
+      ctx.lineTo(lx + 2.5, ly - 27 + bob); ctx.lineTo(lx + 2.5, ly - 18 + bob); ctx.lineTo(lx + 7, ly - 18 + bob); ctx.closePath(); ctx.fill(); ctx.stroke();
     } else label(`${Math.round(hyp(game.aim[0] - b.x, game.aim[1] - b.y) * 3)} ft`, ax + 15, ay - 12);
   }
   // ball
@@ -1084,6 +1086,26 @@ function drawMini() {
     ctx.fillStyle = 'rgba(10,42,29,.85)'; ctx.fillRect(x0 - 3, y0 - 3, miniCam.w + 6, miniCam.h + 6);
     ctx.drawImage(mini, x0, y0, miniCam.w, miniCam.h);
     const mm = miniMatrix(), [mx, my] = toScreen(mm, b.x, b.y), [qx, qy] = toScreen(mm, h.pin[0], h.pin[1]);
+    const mp = (x, y) => { const [sx, sy] = toScreen(mm, x, y); return [x0 + sx, y0 + sy]; };
+    ctx.save(); ctx.beginPath(); ctx.rect(x0, y0, miniCam.w, miniCam.h); ctx.clip();
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    // the last shot's flight path, plus the roll to where the ball is now
+    if (game.tracer.length > 1) {
+      ctx.strokeStyle = COL.tracer; ctx.lineWidth = 1.6; ctx.beginPath();
+      game.tracer.forEach(([x, y], i) => { const [sx, sy] = mp(x, y); i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); });
+      if (game.state === 'flight' || game.state === 'roll') ctx.lineTo(x0 + mx, y0 + my);
+      ctx.stroke();
+    }
+    // the shot being lined up: dashed line to the landing spot
+    if (game.state === 'aim') {
+      const [fx, fy] = norm(game.aim[0] - b.x, game.aim[1] - b.y), n = CLUBS[game.club].putter ? null : shotNumbers(game.club);
+      const tgt = n ? [b.x + fx * n.carry + fy * n.lat, b.y + fy * n.carry - fx * n.lat] : game.aim;
+      const [tx, ty] = mp(tgt[0], tgt[1]);
+      ctx.setLineDash([2.5, 2.5]); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(x0 + mx, y0 + my); ctx.lineTo(tx, ty); ctx.stroke(); ctx.setLineDash([]);
+      ctx.beginPath(); ctx.arc(tx, ty, 2.2, 0, 7); ctx.strokeStyle = COL.flag; ctx.lineWidth = 1.4; ctx.stroke();
+    }
+    ctx.restore();
     ctx.fillStyle = COL.flag; ctx.fillRect(x0 + qx - 1.5, y0 + qy - 1.5, 3, 3);
     ctx.beginPath(); ctx.arc(x0 + mx, y0 + my, 2.6, 0, 7); ctx.fillStyle = '#fff'; ctx.fill(); ctx.strokeStyle = '#000'; ctx.lineWidth = .8; ctx.stroke();
   }
@@ -1167,7 +1189,13 @@ const G3 = (() => {
   const dotM = new T.Mesh(new T.CircleGeometry(1, 24), flatMat('#ffd23f'));
   const aimM = new T.Mesh(new T.RingGeometry(.82, 1, 48), flatMat('#ffffff', .85));
   [ringM, dotM, aimM].forEach(m => { m.rotation.x = -Math.PI / 2; m.renderOrder = 2; });
-  scene.add(ballM, shadowM, ringM, dotM, aimM);
+  // bobbing arrow over the landing spot: a cone tip with a short shaft, pointing down
+  const landArrow = new T.Group();
+  { const am = new T.MeshLambertMaterial({ color:C3('#ffd23f'), emissive:C3('#5a4500') });
+    const tip = new T.Mesh(new T.ConeGeometry(.45, .8, 20), am); tip.rotation.x = Math.PI; tip.position.y = .4; landArrow.add(tip);
+    const stem = cyl(.17, .17, .9, am, 14); stem.position.y = 1.2; landArrow.add(stem); }
+  landArrow.visible = false;
+  scene.add(ballM, shadowM, ringM, dotM, aimM, landArrow);
   const MAXP = 800, trPos = new Float32Array(MAXP * 3), trGeo = new T.BufferGeometry();
   trGeo.setAttribute('position', new T.BufferAttribute(trPos, 3));
   const tracer = new T.Line(trGeo, new T.LineBasicMaterial({ color:C3('#ffd23f'), transparent:true, opacity:.95 }));
@@ -1303,7 +1331,8 @@ const G3 = (() => {
       arrowData.push({ x, y, dx, dy, mag, ph:gr() });
     }
     arrows = new T.InstancedMesh(chevGeo, flatMat('#ffffff', .6), Math.max(1, arrowData.length));
-    arrows.count = arrowData.length; arrows.frustumCulled = false; holeGroup.add(arrows);
+    arrows.count = arrowData.length; arrows.frustumCulled = false; arrows.renderOrder = 3; holeGroup.add(arrows);
+    gm.renderOrder = 1;
 
     // hills
     hills.clear();
@@ -1358,7 +1387,7 @@ const G3 = (() => {
 
     // aim, landing and rollout markers
     const aiming = game.state === 'aim';
-    ringM.visible = dotM.visible = false; aimM.visible = aiming;
+    ringM.visible = dotM.visible = landArrow.visible = false; aimM.visible = aiming;
     if (aiming) {
       const ap = V(game.aim[0], game.aim[1], .03);
       aimM.position.copy(ap); aimM.scale.setScalar(Math.max(.25, camPos.distanceTo(ap) * .016));
@@ -1367,6 +1396,9 @@ const G3 = (() => {
         const L = V(b.x + fx * n.carry + fy * n.lat, b.y + fy * n.carry - fx * n.lat, .04);
         const E = V(b.x + fx * n.total + fy * n.lat, b.y + fy * n.total - fx * n.lat, .04);
         ringM.visible = true; ringM.position.copy(L); ringM.scale.setScalar(camPos.distanceTo(L) * .02);
+        const as = camPos.distanceTo(L) * .028;
+        landArrow.visible = true; landArrow.scale.setScalar(as);
+        landArrow.position.set(L.x, as * (.6 + .35 * Math.sin(t * 4)), L.z); landArrow.rotation.y = t * 1.5;
         if (n.total - n.carry > 1) { dotM.visible = true; dotM.position.copy(E); dotM.scale.setScalar(camPos.distanceTo(E) * .006); }
         G3.marks = { L:[L.x, -L.z], E:[E.x, -E.z], n };
       } else G3.marks = null;
@@ -1410,7 +1442,9 @@ const G3 = (() => {
     }
 
     // slope arrows drift downhill while putting
-    arrows.visible = putt && aiming;
+    // slope arrows appear as soon as the ball is resting or rolling on the green
+    const onGreen = ['green', 'fringe'].includes(surface(h, b.x, b.y)) && game.state !== 'flight';
+    arrows.visible = onGreen || (putt && aiming);
     if (arrows.visible) {
       arrowData.forEach((a, i) => {
         const ph = ((t * (.3 + a.mag * 10) + a.ph) % 1 + 1) % 1, s = (.55 + Math.min(1, a.mag * 25) * .6) * Math.sin(ph * Math.PI);
@@ -1441,11 +1475,7 @@ const G3 = (() => {
       c.fillText(txt, x + 16, y + 9.5);
     }
     if (game.state !== 'aim') return;
-    if (G3.marks && !CLUBS[game.club].putter) {
-      const { L, E, n } = G3.marks, lp = proj(L[0], L[1], 0), ep = proj(E[0], E[1], 0);
-      if (lp) label(`${Math.round(n.carry)} carry`, lp[0] + 12, lp[1]);
-      if (ep && n.total - n.carry > 1) label(`${Math.round(n.total)} total`, ep[0] + 10, ep[1] + 16);
-    } else {
+    if (CLUBS[game.club].putter && hyp(game.aim[0] - h.pin[0], game.aim[1] - h.pin[1]) > 1) {
       const ap = proj(game.aim[0], game.aim[1], 0);
       if (ap) label(`${Math.round(hyp(game.aim[0] - b.x, game.aim[1] - b.y) * 3)} ft`, ap[0] + 12, ap[1] - 14);
     }
