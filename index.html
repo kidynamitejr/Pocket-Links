@@ -831,8 +831,8 @@ dropBtn.onclick = () => {
 const pad = $('pad');
 let sw = null;
 /* The angle of the upswipe sets the curve. A thumb naturally arcs a little as it swipes,
-   so anything within about 8 degrees of straight up counts as straight; about 30 degrees is a full hook or slice. */
-const SWIPE_DEAD = .14, SWIPE_FULL = .52;
+   so anything within about 3 degrees of straight up counts as straight; about 10 degrees is a full hook or slice. */
+const SWIPE_DEAD = .047, SWIPE_FULL = .175;
 let lastShape = null;
 function swipeShape(e) {
   const up = Math.max(1, sw.yb - e.clientY), a = Math.atan2(e.clientX - sw.xb, up);
