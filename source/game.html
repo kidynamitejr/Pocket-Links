@@ -533,6 +533,7 @@ function readyShot() {
   if (game.view === 'hole' && d < 280) pts.push(h.pin);
   game.camT = frameFor(a, pts, game.view);
   game.state = 'aim';
+  if (game.strokes > 0) game.readyAt = game.time + 1;
   ui();
 }
 function loadHole(i) {
@@ -824,7 +825,7 @@ function gauge(p) {
 }
 pad.addEventListener('pointerdown', e => {
   wakeAudio();
-  if (game.state !== 'aim' || overlayOpen()) return;
+  if (game.state !== 'aim' || overlayOpen() || game.time < (game.readyAt || 0)) return;
   try { pad.setPointerCapture(e.pointerId); } catch (err) {}
   sw ={ x0:e.clientX, y0:e.clientY, max:0, xb:e.clientX, through:false };
 });
@@ -1172,30 +1173,52 @@ const G3 = (() => {
   const tracer = new T.Line(trGeo, new T.LineBasicMaterial({ color:C3('#ffd23f'), transparent:true, opacity:.95 }));
   tracer.frustumCulled = false; scene.add(tracer);
 
-  // golfer: built facing +Z (toward the ball) with +X pointing down the target line
+  // the club: swings around an unseen shoulder pivot. Local +X points down the target line, +Z toward the ball.
   const golfer = new T.Group(), arms = new T.Group();
   const toBall = new T.Vector3(0, -1.45, .55).normalize();
   const swingAxis = new T.Vector3(1, 0, 0).cross(toBall).normalize();
+  const heads = {};
   {
-    const pants = mat('#cbbd97'), shirt = mat('#1f3b63'), skin = mat('#d6a47c'), white = mat('#f4f4ee'), dark = mat('#26292b'), belt = mat('#2a2a2a');
-    for (const sx of [-.12, .12]) {
-      const leg = cyl(.08, .065, .9, pants); leg.position.set(sx, .47, .03); leg.rotation.x = .08; golfer.add(leg);
-      const shoe = new T.Mesh(new T.BoxGeometry(.11, .07, .27), white); shoe.position.set(sx, .035, .08); golfer.add(shoe);
-    }
-    const hips = cyl(.17, .17, .12, belt); hips.position.set(0, .93, .06); golfer.add(hips);
-    const torso = cyl(.21, .16, .7, shirt); torso.position.set(0, 1.25, .16); torso.rotation.x = .42; golfer.add(torso);
-    const head = new T.Mesh(new T.SphereGeometry(.12, 16, 12), skin); head.position.set(0, 1.66, .38); golfer.add(head);
-    const cap = new T.Mesh(new T.SphereGeometry(.126, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), white); cap.position.set(0, 1.69, .38); golfer.add(cap);
-    const brim = new T.Mesh(new T.BoxGeometry(.17, .015, .13), white); brim.position.set(0, 1.7, .5); golfer.add(brim);
+    const chrome = new T.MeshPhongMaterial({ color:C3('#c8ccd1'), specular:0xffffff, shininess:110 });
+    const steel = new T.MeshPhongMaterial({ color:C3('#9aa1a8'), specular:0xffffff, shininess:90 });
+    const gripM = new T.MeshPhongMaterial({ color:C3('#1b1d1f'), shininess:8 });
+    const woodM = new T.MeshPhongMaterial({ color:C3('#15171a'), specular:0x888888, shininess:120 });
+    const faceM = new T.MeshPhongMaterial({ color:C3('#5d6369'), specular:0xffffff, shininess:60 });
+    const accent = new T.MeshPhongMaterial({ color:C3('#ffd23f'), shininess:40 });
     arms.position.set(0, 1.45, .3); golfer.add(arms);
-    const along = (len, r, m, start) => {
-      const c = cyl(r, r, len, m, 8); c.quaternion.setFromUnitVectors(UP, toBall);
+    const along = (len, r1, r2, m, start) => {
+      const c = cyl(r1, r2, len, m, 12); c.quaternion.setFromUnitVectors(UP, toBall);
       c.position.copy(toBall.clone().multiplyScalar(start + len / 2)); return c;
     };
-    arms.add(along(.62, .05, shirt, 0), along(.08, .045, skin, .6), along(.93, .011, dark, .62));
-    const clubHead = new T.Mesh(new T.BoxGeometry(.11, .045, .06), dark); clubHead.position.copy(toBall.clone().multiplyScalar(1.55)); arms.add(clubHead);
+    // tapered grip with a cap, then a steel shaft that narrows toward the head
+    arms.add(along(.26, .016, .019, gripM, .5), along(.012, .02, .02, gripM, .49), along(.9, .0075, .0105, steel, .76));
+    const end = toBall.clone().multiplyScalar(1.55);
+    const hosel = along(.07, .008, .011, chrome, 1.48); arms.add(hosel);
+    // driver/wood/hybrid: rounded glossy head with a face plate and an alignment mark
+    const wood = new T.Group();
+    const crown = new T.Mesh(new T.SphereGeometry(1, 24, 14), woodM); crown.scale.set(.05, .028, .058); wood.add(crown);
+    const face = new T.Mesh(new T.BoxGeometry(.004, .036, .07), faceM); face.position.set(.046, 0, 0); wood.add(face);
+    const mark = new T.Mesh(new T.BoxGeometry(.03, .002, .004), accent); mark.position.set(.015, .028, 0); wood.add(mark);
+    wood.position.set(end.x - .05, .028, end.z + .02); heads.wood = wood;
+    // iron: thin chrome blade with a thicker cavity back and grooves
+    const iron = new T.Group();
+    const blade = new T.Mesh(new T.BoxGeometry(.012, .045, .08), chrome); blade.rotation.z = -.25; iron.add(blade);
+    const back = new T.Mesh(new T.BoxGeometry(.01, .02, .07), steel); back.position.set(-.009, -.01, 0); iron.add(back);
+    for (let i = 0; i < 4; i++) { const gv = new T.Mesh(new T.BoxGeometry(.001, .002, .06), faceM); gv.position.set(.0065, -.012 + i * .008, 0); gv.rotation.z = -.25; iron.add(gv); }
+    iron.position.set(end.x - .03, .023, end.z + .015); heads.iron = iron;
+    // putter: flat blade with a sight line
+    const putter = new T.Group();
+    const pb = new T.Mesh(new T.BoxGeometry(.022, .022, .1), faceM); putter.add(pb);
+    const sight = new T.Mesh(new T.BoxGeometry(.012, .001, .003), accent); sight.position.set(0, .0115, 0); putter.add(sight);
+    putter.position.set(end.x - .035, .011, end.z + .01); heads.putter = putter;
+    // heads live in golfer space at address; parent them to the swinging arms instead
+    for (const k in heads) { heads[k].position.sub(arms.position); arms.add(heads[k]); }
   }
   scene.add(golfer);
+  function showHead(club) {
+    const kind = club.putter ? 'putter' : (club.wood || club.id === '4H') ? 'wood' : 'iron';
+    for (const k in heads) heads[k].visible = k === kind;
+  }
 
   // per-hole objects
   let holeGroup = null, flag = null, cloth = null, clothBase = null, arrows = null, arrowData = [], curHole = -1;
@@ -1291,7 +1314,7 @@ const G3 = (() => {
     let pos = null, look = null, k = 1 - Math.exp(-dt * 3.5);
     if (game.state === 'flight' && game.flight) {
       const f = game.flight, u = Math.min(1, f.t), e = u * u * (3 - 2 * u);
-      const start = V(f.sx - f.fx * 9.5, f.sy - f.fy * 9.5, 3.4);
+      const start = V(f.sx - f.fx * 6, f.sy - f.fy * 6, 2.5);
       const end = V(f.lx - f.fx * 40 + f.rx * 9, f.ly - f.fy * 40 + f.ry * 9, 14);
       pos = start.lerp(end, e * e); look = V(b.x, b.y, b.h * .85); k = 1 - Math.exp(-dt * 7);
     } else if (game.state === 'roll' && !game.putt) {
@@ -1299,8 +1322,8 @@ const G3 = (() => {
       pos = V(b.x - dx * 24, b.y - dy * 24, 9); look = V(b.x, b.y, 0); k = 1 - Math.exp(-dt * 3);
     } else if (game.state === 'aim') {
       const ad = hyp(game.aim[0] - b.x, game.aim[1] - b.y);
-      const back = putt ? 3.4 : 9.5, up = putt ? 1.4 : 3.4, ahead = putt ? Math.min(ad, 12) : 55;
-      pos = V(b.x - fx * back + fy * .6, b.y - fy * back - fx * .6, up); look = V(b.x + fx * ahead, b.y + fy * ahead, putt ? 0 : 2.6);
+      const back = putt ? 3 : 6, up = putt ? 1.3 : 2.5, ahead = putt ? Math.min(ad, 12) : 55;
+      pos = V(b.x - fx * back + fy * .3, b.y - fy * back - fx * .3, up); look = V(b.x + fx * ahead, b.y + fy * ahead, putt ? 0 : 2.6);
     }
     if (pos) {
       if (snap) { camPos.copy(pos); camLook.copy(look); snap = false; }
@@ -1349,7 +1372,7 @@ const G3 = (() => {
       const xA = new T.Vector3(fx, 0, -fy), zA = new T.Vector3(fy, 0, fx);
       tmpM.makeBasis(xA, UP, zA); golfer.quaternion.setFromRotationMatrix(tmpM);
       golfer.position.copy(V(b.x - fy * .85, b.y + fx * .85, 0));
-      putterSwing = CLUBS[game.club].putter;
+      putterSwing = CLUBS[game.club].putter; showHead(CLUBS[game.club]);
       const target = pull * (putterSwing ? .55 : 2.5);
       swingA += (target - swingA) * Math.min(1, dt * 18);
     } else if (t - strikeT < 2.4) {
@@ -1458,6 +1481,8 @@ function frame(now) {
   const H = 1 / 240;
   while (acc >= H) { step(H); acc -= H; }
   camStep(dt);
+  const locked = game.state !== 'aim' || game.time < (game.readyAt || 0);
+  if (locked !== pad.classList.contains('off')) pad.classList.toggle('off', locked);
   draw();
   requestAnimationFrame(frame);
 }
